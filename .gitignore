@@ -1,0 +1,17 @@
+token.txt
+**/token.txt
+.env
+.env.*
+.build-cache/
+.DS_Store
+
+# Swift and Xcode build output
+.build/
+DerivedData/
+*.dSYM/
+xcuserdata/
+*.xcuserstate
+
+# Downloadable archives
+/downloads/
+*.zip
