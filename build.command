@@ -11,18 +11,21 @@ cat > LGBar.app/Contents/Info.plist <<'PLIST'
 <key>CFBundleName</key><string>LGBar</string>
 <key>CFBundleExecutable</key><string>LGBar</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>1.3.6</string>
-<key>CFBundleVersion</key><string>152</string>
+<key>CFBundleShortVersionString</key><string>1.3.7</string>
+<key>CFBundleVersion</key><string>153</string>
 <key>LSMinimumSystemVersion</key><string>13.0</string>
 <key>LSUIElement</key><true/>
 <key>NSHighResolutionCapable</key><true/>
 </dict></plist>
 PLIST
-if [[ ! -s token.txt ]]; then
+if [[ "${LG_BAR_RELEASE:-0}" == "1" ]]; then
+  rm -f LGBar.app/Contents/Resources/token.txt
+elif [[ ! -s token.txt ]]; then
   printf 'token.txt is missing or empty\n' >&2
   exit 1
+else
+  cp token.txt LGBar.app/Contents/Resources/token.txt
+  chmod 600 LGBar.app/Contents/Resources/token.txt
 fi
-cp token.txt LGBar.app/Contents/Resources/token.txt
-chmod 600 LGBar.app/Contents/Resources/token.txt
 codesign --force --sign - LGBar.app
 printf 'Built LGBar.app\n'
