@@ -1,6 +1,6 @@
 # LG Bar
 
-Version 1.4.0 (build 154)
+Version 1.4.1 (build 155)
 
 Control your LG ThinQ air conditioner from the macOS menu bar.
 
