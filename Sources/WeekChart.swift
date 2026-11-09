@@ -17,7 +17,7 @@ struct DayUsage: Codable, Equatable {
     formatter.dateFormat = "d MMM"
     let date = parsedDate.map { formatter.string(from: $0) } ?? day
     let energy =
-      wh.map { (estimated == true ? "≈" : "") + String(format: "%.2f ⚡ kWh", $0 / 1000) }
+      wh.map { (estimated == true ? "≈" : "") + formatEnergy($0) }
       ?? "No reading"
     var parts = [date + (shifted == true ? " · 09–09" : ""), energy]
     if let seconds {
@@ -68,6 +68,9 @@ struct WeekHistory: Codable {
   static func dayKey(_ date: Date, _ cal: Calendar) -> String {
     let c = cal.dateComponents([.year, .month, .day], from: date)
     return String(format: "%04d%02d%02d", c.year!, c.month!, c.day!)
+  }
+  static func monthKey(_ date: Date, _ calendar: Calendar) -> String {
+    String(dayKey(date, calendar).prefix(6))
   }
   static func nine(_ date: Date, _ cal: Calendar) -> Date {
     cal.date(bySettingHour: 9, minute: 0, second: 0, of: date)!

@@ -129,6 +129,10 @@ func liveWatts(_ value: Any) -> Double? {
   }
   return nil
 }
+func formatEnergy(_ wattHours: Double) -> String {
+  String(format: "%.2f ⚡ kWh", wattHours / 1000)
+}
+
 func energyTotal(_ value: Any) -> Double? {
   let result = object(object(value)["result"] ?? value)
   if let n = number(result["total"]) { return n }

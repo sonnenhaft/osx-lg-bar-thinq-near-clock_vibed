@@ -6,6 +6,7 @@ token.txt
 .DS_Store
 
 # Swift and Xcode build output
+/LGBar.app/
 .build/
 DerivedData/
 *.dSYM/

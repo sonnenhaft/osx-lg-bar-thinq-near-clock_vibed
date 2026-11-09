@@ -21,7 +21,11 @@ import CoreLocation
     manager.desiredAccuracy = kCLLocationAccuracyKilometer
   }
   func start() {
-    refresh()
+    if manager.authorizationStatus == .notDetermined {
+      permit()
+    } else {
+      refresh()
+    }
     timer = Timer.scheduledTimer(withTimeInterval: 900, repeats: true) { [weak self] _ in
       Task { @MainActor in self?.refresh() }
     }

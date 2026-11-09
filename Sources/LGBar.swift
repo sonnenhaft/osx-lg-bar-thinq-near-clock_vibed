@@ -138,7 +138,10 @@ func normalizeVisibility() {
     buildMenu()
     ageTimer?.invalidate()
     let t = Timer(timeInterval: 5, repeats: true) { [weak self] _ in
-      Task { @MainActor in self?.updateAge() }
+      Task { @MainActor in
+        self?.updateAge()
+        self?.updateEnergyRows()
+      }
     }
     ageTimer = t
     RunLoop.main.add(t, forMode: .common)
@@ -268,7 +271,15 @@ func normalizeVisibility() {
     if change.0 == "airConJobMode", choice.enabled == false {
       priorEcoMode = displayValue("airConJobMode", "currentJobMode") as? String
     }
-    send([change])
+    var changes = [change]
+    if let temperature = displayValue("temperature", "targetTemperature"),
+      allowed("temperature", "targetTemperature", temperature) {
+      changes.append(("temperature", "targetTemperature", temperature))
+    }
+    if let speed = displayValue("airFlow", windKey), allowed("airFlow", windKey, speed) {
+      changes.append(("airFlow", windKey, speed))
+    }
+    send(changes)
   }
   func bounds() -> (Double, Double) {
     let c = capability("temperature", "targetTemperature")
@@ -285,8 +296,8 @@ func normalizeVisibility() {
     let set = number(displayValue("temperature", "targetTemperature")) ?? current
     var readings: [(text: String, isAC: Bool)] = []
     if connected {
-      if defaults.bool(forKey: "sensor"), let sensor { readings.append((degree(sensor), false)) }
       if defaults.bool(forKey: "current") { readings.append((degree(set), true)) }
+      if defaults.bool(forKey: "sensor"), let sensor { readings.append((degree(sensor), false)) }
     }
     if defaults.bool(forKey: "locationWeather"), let temperature = locationWeather.temperature {
       readings.append((degree(temperature), false))
@@ -300,7 +311,15 @@ func normalizeVisibility() {
     ]
     if let textColor { attrs[.foregroundColor] = textColor }
     let title = NSMutableAttributedString(string: "")
+    let stacked = readings.count == 3
     for (index, reading) in readings.enumerated() {
+      if stacked && index == 1 {
+        title.append(NSAttributedString(string: " ", attributes: attrs))
+        title.append(temperatureStack(
+          room: reading.text, outside: readings[2].text, fontSize: size,
+          color: textColor ?? .labelColor))
+        break
+      }
       if index > 0 { title.append(NSAttributedString(string: " / ", attributes: attrs)) }
       if index == 0 && eco == true {
         title.append(NSAttributedString(string: ecoSymbol, attributes: attrs))
@@ -322,7 +341,7 @@ func normalizeVisibility() {
     powerRow?.button.title = powerIsOn ? "Turn OFF" : "Turn ON"
     if let r = temperatureRow, !r.slider.isHighlighted, let c = set {
       r.slider.doubleValue = c
-      r.label.stringValue = degree(c)
+      r.label.stringValue = r.format(c)
     }
     for (t, r) in presetRows {
       let match =
@@ -403,7 +422,7 @@ func normalizeVisibility() {
     if !profile.isEmpty {
       if canWrite("temperature", "targetTemperature") {
         let (lo, hi) = bounds()
-        let r = SliderRow(value: current ?? lo, min: lo, max: max(lo, hi), format: { degree($0) }) {
+        let r = SliderRow(value: current ?? lo, min: lo, max: max(lo, hi), format: { degree($0.rounded()) }) {
           [weak self] v in self?.setDegrees(v)
         }
         r.commitOnRelease = true
@@ -477,7 +496,7 @@ func normalizeVisibility() {
     let login = item("Launch at login", #selector(login))
     login.state = SMAppService.mainApp.status == .enabled ? .on : .off
     menu.addItem(.separator())
-    item(TokenFile.read().isEmpty ? "Set token…" : "Change token…", #selector(openSettings))
+    item("LG settings…", #selector(openSettings))
     energySeparator = .separator()
     menu.addItem(energySeparator!)
     powerItem = item("")
@@ -508,16 +527,13 @@ func normalizeVisibility() {
     let watts = connected ? liveWatts(state) : nil
     powerItem?.isHidden = watts == nil
     if let watts { powerItem?.title = String(format: "Power now  %.2f ⚡ kW", watts / 1000) }
-    let monthFormat = DateFormatter()
-    monthFormat.locale = Locale(identifier: "en_US_POSIX")
-    monthFormat.dateFormat = "yyyyMM"
-    let currentMonth = monthFormat.string(from: Date())
-    monthFormat.dateFormat = "MMMM"
-    let monthName = monthFormat.string(from: Date())
-    let monthWh = weekHistory.month == currentMonth ? weekHistory.monthWh : nil
+    let now = Date()
+    let monthWh = weekHistory.month == WeekHistory.monthKey(now, .current) ? weekHistory.monthWh : nil
     monthItem?.isHidden = monthWh == nil
-    monthItem?.title = monthWh.map { String(format: "\(monthName) so far  %.2f ⚡ kWh", $0 / 1000) }
-      ?? "\(monthName) so far  — ⚡ kWh"
+    if let monthWh {
+      let month = now.formatted(.dateTime.month(.wide).locale(Locale(identifier: "en_US")))
+      monthItem?.title = "\(month) so far  " + formatEnergy(monthWh)
+    }
     let showChart = weekBars.contains { $0.wh != nil }
     chartItem?.isHidden = !showChart
     (chartItem?.view as? WeekChart)?.days = weekBars
@@ -769,13 +785,17 @@ func normalizeVisibility() {
         do {
           try await readForCommand(id)
           try Task.checkCancellation()
+          let changesMode = batch.contains {
+            $0.0 == "powerSave" || $0.0 == "airConJobMode"
+          }
           for (group, key, wanted) in batch {
             try Task.checkCancellation()
             if group == "temperature", let n = number(wanted) {
               let (lo, hi) = bounds()
               guard n >= lo && n <= hi else { throw LGError(message: "Outside supported range") }
             }
-            if !selections.hasUnconfirmed(group, key), let old = reported(group, key),
+            let reapplySetting = changesMode && (group == "temperature" || group == "airFlow")
+            if !reapplySetting, !selections.hasUnconfirmed(group, key), let old = reported(group, key),
               equal(old, wanted)
             {
               continue
@@ -894,15 +914,10 @@ func normalizeVisibility() {
         guard cachedEnergyProfile == true else { return }
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: Date())
-        let format = DateFormatter()
-        format.locale = Locale(identifier: "en_US_POSIX")
-        format.calendar = calendar
-        format.timeZone = calendar.timeZone
-        format.dateFormat = "yyyyMMdd"
         func usage(_ from: Int, _ through: Int) async throws -> Any {
           try Task.checkCancellation()
-          let start = format.string(from: calendar.date(byAdding: .day, value: from, to: today)!)
-          let end = format.string(from: calendar.date(byAdding: .day, value: through, to: today)!)
+          let start = WeekHistory.dayKey(calendar.date(byAdding: .day, value: from, to: today)!, calendar)
+          let end = WeekHistory.dayKey(calendar.date(byAdding: .day, value: through, to: today)!, calendar)
           return try await client.request(
             "devices/energy/\(id)/usage?property=energyUsage&period=DAILY&startDate=\(start)&endDate=\(end)"
           )
@@ -939,8 +954,7 @@ func normalizeVisibility() {
           do {
             let monthly = try await usage(-offset, 0)
             try Task.checkCancellation()
-            format.dateFormat = "yyyyMM"
-            weekHistory.month = format.string(from: today)
+            weekHistory.month = WeekHistory.monthKey(today, calendar)
             weekHistory.monthWh = energyTotal(monthly)
             weekHistory.save(key)
           } catch {
@@ -961,12 +975,12 @@ func normalizeVisibility() {
       return
     }
     let w = NSWindow(
-      contentRect: NSRect(x: 0, y: 0, width: 450, height: 250), styleMask: [.titled, .closable],
+      contentRect: NSRect(x: 0, y: 0, width: 450, height: 245), styleMask: [.titled, .closable],
       backing: .buffered, defer: false)
-    w.title = TokenFile.read().isEmpty ? "Set token" : "Change token"
+    w.title = "LG settings"
     w.isReleasedWhenClosed = false
     settings = w
-    let root = NSView(frame: NSRect(x: 0, y: 0, width: 450, height: 250))
+    let root = NSView(frame: NSRect(x: 0, y: 0, width: 450, height: 245))
     w.contentView = root
     func label(_ s: String, _ y: Double) {
       let l = NSTextField(labelWithString: s)

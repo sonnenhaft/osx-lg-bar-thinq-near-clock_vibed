@@ -134,6 +134,26 @@ func lgIcon() -> NSImage {
   }
 }
 
+func temperatureStack(room: String, outside: String, fontSize: CGFloat, color: NSColor) -> NSAttributedString {
+  let font = NSFont.monospacedDigitSystemFont(ofSize: fontSize * 0.7, weight: .medium)
+  let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
+  let top = NSAttributedString(string: room, attributes: attributes)
+  let bottom = NSAttributedString(string: outside, attributes: attributes)
+  let lineHeight = ceil(max(top.size().height, bottom.size().height))
+  let size = NSSize(width: ceil(max(top.size().width, bottom.size().width)), height: lineHeight * 2)
+  let image = NSImage(size: size, flipped: false) { _ in
+    top.draw(at: NSPoint(x: 0, y: lineHeight))
+    bottom.draw(at: .zero)
+    return true
+  }
+  let attachment = NSTextAttachment()
+  attachment.image = image
+  let fullFont = NSFont.monospacedDigitSystemFont(ofSize: fontSize, weight: .medium)
+  attachment.bounds = NSRect(
+    x: 0, y: (fullFont.capHeight - size.height) / 2, width: size.width, height: size.height)
+  return NSAttributedString(attachment: attachment)
+}
+
 /// The small filled discs keep their shape at menu-bar font sizes.
 final class FanIndicator {
   private var cachedCount = 0
