@@ -42,8 +42,13 @@ func normalizeVisibility() {
   lazy var api = API()
   let emblem = lgIcon()
   let fanIndicator = FanIndicator()
+  let locationWeather = LocationWeather()
   let ecoSymbol = "♻️"
   var header: NSMenuItem?
+  var headerLabel: NSTextField?
+  var headerLoading: NSImageView?
+  var loadingTimer: Timer?
+  var loadingFrame = 0
   var errorItem: NSMenuItem?
   var displayRows: [String: ActionRow] = [:]
   var presetRows: [Double: ActionRow] = [:]
@@ -51,6 +56,7 @@ func normalizeVisibility() {
   let speeds = ["LOW", "MID", "HIGH"]
   var powerRow: ActionRow?
   var refreshRow: ActionRow?
+  var monthItem: NSMenuItem?
   var powerItem: NSMenuItem?
   var energySeparator: NSMenuItem?
   var chartItem: NSMenuItem?
@@ -97,6 +103,7 @@ func normalizeVisibility() {
   func applicationDidFinishLaunching(_ n: Notification) {
     defaults.register(defaults: [
       "font": 13.0, "icon": true, "sensor": true, "current": true, "interval": 60.0,
+      "locationWeather": true,
     ])
     normalizeVisibility()
     status = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -105,6 +112,11 @@ func normalizeVisibility() {
     menu.autoenablesItems = false
     buildMenu()
     updateStatus()
+    locationWeather.changed = { [weak self] in
+      guard let self else { return }
+      if self.menuVisible { self.buildMenu() } else { self.updateStatus() }
+    }
+    locationWeather.start()
     startTimer()
     refresh()
   }
@@ -137,9 +149,47 @@ func normalizeVisibility() {
     let device = devices.first(where: { $0.id == selected })
     let name = (device?.name ?? "LG Bar") + (device != nil && !connected ? "   OFFLINE" : "")
     let busy = polling || sending || energyTask != nil || imageTask != nil
-    header.title = busy ? name + "   Refreshing…" : name
+    header.title = name
+    headerLabel?.stringValue = name
+    headerLoading?.isHidden = !busy
+    if busy {
+      drawLoadingIndicator()
+      if loadingTimer == nil {
+        let timer = Timer(timeInterval: 0.08, repeats: true) { [weak self] _ in
+          Task { @MainActor in
+            guard let self else { return }
+            self.loadingFrame = (self.loadingFrame + 1) % 12
+            self.drawLoadingIndicator()
+          }
+        }
+        loadingTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+      }
+    } else {
+      loadingTimer?.invalidate()
+      loadingTimer = nil
+      headerLoading?.image = nil
+    }
     errorItem?.title = message
     errorItem?.isHidden = message.isEmpty
+  }
+  func drawLoadingIndicator() {
+    let frame = loadingFrame
+    let image = NSImage(size: NSSize(width: 16, height: 16), flipped: false) { _ in
+      for index in 0..<12 {
+        NSColor.black.withAlphaComponent(CGFloat(12 - (index + frame) % 12) / 12).setStroke()
+        let angle = Double(index) * .pi / 6
+        let path = NSBezierPath()
+        path.lineWidth = 1.7
+        path.lineCapStyle = .round
+        path.move(to: NSPoint(x: 8 + cos(angle) * 3.5, y: 8 + sin(angle) * 3.5))
+        path.line(to: NSPoint(x: 8 + cos(angle) * 6, y: 8 + sin(angle) * 6))
+        path.stroke()
+      }
+      return true
+    }
+    image.isTemplate = true
+    headerLoading?.image = image
   }
   @discardableResult func item(
     _ title: String, _ action: Selector? = nil, _ represented: Any? = nil
@@ -238,6 +288,9 @@ func normalizeVisibility() {
       if defaults.bool(forKey: "sensor"), let sensor { readings.append((degree(sensor), false)) }
       if defaults.bool(forKey: "current") { readings.append((degree(set), true)) }
     }
+    if defaults.bool(forKey: "locationWeather"), let temperature = locationWeather.temperature {
+      readings.append((degree(temperature), false))
+    }
     let button = status.button
     let icon = defaults.bool(forKey: "icon") || readings.isEmpty ? emblem : nil
     if button?.image !== icon { button?.image = icon }
@@ -279,7 +332,7 @@ func normalizeVisibility() {
     }
     for (key, row) in displayRows {
       let value = key == "sensor" ? sensor : key == "current" ? set : nil
-      let title = key == "sensor" ? "current room" : key == "current" ? "AC temperature" : "icon"
+      let title = key == "sensor" ? "room temperature" : key == "current" ? "AC temperature" : "LG icon"
       row.button.title =
         (defaults.bool(forKey: key) ? "Hide " : "Show ") + title
       row.button.isEnabled = key != "current" || defaults.bool(forKey: "icon")
@@ -307,6 +360,21 @@ func normalizeVisibility() {
     displayRows = [:]
     let device = item("LG Bar")
     header = device
+    let headerView = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 26))
+    let nameLabel = NSTextField(labelWithString: "LG Bar")
+    nameLabel.font = .menuFont(ofSize: 13)
+    nameLabel.lineBreakMode = .byTruncatingTail
+    nameLabel.frame = NSRect(x: 14, y: 4, width: 242, height: 18)
+    headerView.addSubview(nameLabel)
+    headerLabel = nameLabel
+    let loading = NSImageView(frame: NSRect(x: 260, y: 5, width: 16, height: 16))
+    loading.isHidden = true
+    headerView.addSubview(loading)
+    headerLoading = loading
+    let arrow = NSImageView(frame: NSRect(x: 282, y: 7, width: 8, height: 12))
+    arrow.image = NSImage(systemSymbolName: "chevron.right", accessibilityDescription: nil)
+    headerView.addSubview(arrow)
+    device.view = headerView
     let sub = NSMenu()
     sub.autoenablesItems = false
     for d in devices {
@@ -383,6 +451,28 @@ func normalizeVisibility() {
       }
       displayRows[key] = r
     }
+    if let name = locationWeather.name {
+      let visible = defaults.bool(forKey: "locationWeather")
+      let location = row(
+        "\(visible ? "Hide" : "Show") current location (\(name))",
+        degree(locationWeather.temperature)
+      ) { [weak self] in
+        defaults.set(!defaults.bool(forKey: "locationWeather"), forKey: "locationWeather")
+        self?.buildMenu()
+      }
+      location.button.frame.size.width = 205
+      location.button.cell?.lineBreakMode = .byTruncatingTail
+      location.toolTip = "Current location: \(name) · Weather: Open-Meteo"
+    } else {
+      _ = row(locationWeather.allowed ? "Retry current location" : "Allow current location…") { [weak self] in
+        self?.locationWeather.permit()
+      }
+    }
+    if locationWeather.allowed && !locationWeather.notice.isEmpty {
+      let retry = row(locationWeather.notice) { [weak self] in self?.locationWeather.refresh() }
+      retry.button.isEnabled = !locationWeather.notice.contains("…")
+    }
+    menu.addItem(.separator())
     buildAppearanceRows()
     let login = item("Launch at login", #selector(login))
     login.state = SMAppService.mainApp.status == .enabled ? .on : .off
@@ -392,6 +482,8 @@ func normalizeVisibility() {
     menu.addItem(energySeparator!)
     powerItem = item("")
     powerItem?.isEnabled = false
+    monthItem = item("")
+    monthItem?.isEnabled = false
     let chart = NSMenuItem()
     chart.view = WeekChart()
     menu.addItem(chart)
@@ -415,11 +507,21 @@ func normalizeVisibility() {
     guard menuVisible else { return }
     let watts = connected ? liveWatts(state) : nil
     powerItem?.isHidden = watts == nil
-    if let watts { powerItem?.title = String(format: "Power now  %.0f W", watts) }
+    if let watts { powerItem?.title = String(format: "Power now  %.2f ⚡ kW", watts / 1000) }
+    let monthFormat = DateFormatter()
+    monthFormat.locale = Locale(identifier: "en_US_POSIX")
+    monthFormat.dateFormat = "yyyyMM"
+    let currentMonth = monthFormat.string(from: Date())
+    monthFormat.dateFormat = "MMMM"
+    let monthName = monthFormat.string(from: Date())
+    let monthWh = weekHistory.month == currentMonth ? weekHistory.monthWh : nil
+    monthItem?.isHidden = monthWh == nil
+    monthItem?.title = monthWh.map { String(format: "\(monthName) so far  %.2f ⚡ kWh", $0 / 1000) }
+      ?? "\(monthName) so far  — ⚡ kWh"
     let showChart = weekBars.contains { $0.wh != nil }
     chartItem?.isHidden = !showChart
     (chartItem?.view as? WeekChart)?.days = weekBars
-    energySeparator?.isHidden = watts == nil && !showChart
+    energySeparator?.isHidden = watts == nil && !showChart && monthWh == nil
   }
   func buildAppearanceRows() {
     let ix = intervals.firstIndex(of: defaults.double(forKey: "interval")) ?? 3
@@ -429,7 +531,7 @@ func normalizeVisibility() {
       defaults.set(intervals[Int(v.rounded())], forKey: "interval")
       self?.startTimer()
     }
-    interval.inlineLabel("Refresh interval", width: 90)
+    interval.topLabel("Refresh interval")
     custom(interval)
     let font = SliderRow(
       value: defaults.double(forKey: "font"), min: 7, max: 20, format: { String(Int($0)) + " pt" }
@@ -623,6 +725,8 @@ func normalizeVisibility() {
   func menuDidClose(_ m: NSMenu) {
     if m === menu {
       menuVisible = false
+      loadingTimer?.invalidate()
+      loadingTimer = nil
       ageTimer?.invalidate()
       ageTimer = nil
     }
@@ -829,6 +933,20 @@ func normalizeVisibility() {
             use: observedUse)
           weekHistory.save(key)
           weekBars = weekHistory.days
+          // Fetch the entire civil month; the chart intentionally covers only ten days.
+          let first = calendar.dateInterval(of: .month, for: today)!.start
+          let offset = calendar.dateComponents([.day], from: first, to: today).day!
+          do {
+            let monthly = try await usage(-offset, 0)
+            try Task.checkCancellation()
+            format.dateFormat = "yyyyMM"
+            weekHistory.month = format.string(from: today)
+            weekHistory.monthWh = energyTotal(monthly)
+            weekHistory.save(key)
+          } catch {
+            try Task.checkCancellation()
+            // A missing monthly reading must not discard the daily chart.
+          }
         }
         historyFailures = 0
         updateEnergyRows()

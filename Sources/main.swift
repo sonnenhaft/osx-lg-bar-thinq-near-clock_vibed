@@ -11,6 +11,9 @@ if CommandLine.arguments.contains("--self-test") {
   precondition(energyTotal(["result": ["usage": []]]) == nil)
   precondition(liveWatts(["energyUsage": 500]) == nil)
   precondition(liveWatts(["currentPower": 340]) == 340)
+  precondition(liveWatts(["currentPowerConsumption": ["value": 0.53, "unit": "kW"]]) == 530)
+  precondition(liveWatts(["currentPower": ["value": 27.62, "unit": "kWh"]]) == nil)
+  precondition(DayUsage(day: "20261103", label: "3", wh: 1000).detail == "3 Nov   1.00 ⚡ kWh")
   precondition(intervals == [1, 5, 30, 60, 300, 600])
   precondition(
     energyTotal(["result": ["dataList": [["energyUsage": 750], ["energyUsage": 1250]]]]) == 2000)

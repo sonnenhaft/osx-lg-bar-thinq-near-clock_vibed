@@ -14,10 +14,10 @@ struct DayUsage: Codable, Equatable {
     formatter.locale = Locale(identifier: "en_US_POSIX")
     formatter.dateFormat = "yyyyMMdd"
     let parsedDate = formatter.date(from: day)
-    formatter.dateFormat = "d/MMM/y"
+    formatter.dateFormat = "d MMM"
     let date = parsedDate.map { formatter.string(from: $0) } ?? day
     let energy =
-      wh.map { (estimated == true ? "≈" : "") + String(format: "%.2f kWh", $0 / 1000) }
+      wh.map { (estimated == true ? "≈" : "") + String(format: "%.2f ⚡ kWh", $0 / 1000) }
       ?? "No reading"
     var parts = [date + (shifted == true ? " · 09–09" : ""), energy]
     if let seconds {
@@ -52,6 +52,8 @@ struct Morning: Codable {
 struct WeekHistory: Codable {
   var lastAttempt: Date?
   var days: [DayUsage] = []
+  var month: String? = nil
+  var monthWh: Double? = nil
   var mornings: [String: Morning]? = nil  // optional to read earlier caches
   func due(at date: Date) -> Bool { lastAttempt.map { date.timeIntervalSince($0) >= 3600 } ?? true }
   static func load(_ key: String) -> Self {

@@ -120,12 +120,12 @@ func lgIcon() -> NSImage {
     addSubview(label)
   }
   required init?(coder: NSCoder) { fatalError() }
-  func inlineLabel(_ title: String, width: CGFloat) {
+  func topLabel(_ title: String) {
+    setFrameSize(NSSize(width: frame.width, height: 46))
     let caption = NSTextField(labelWithString: title)
     caption.font = .menuFont(ofSize: 12)
-    caption.frame = NSRect(x: 13, y: 7, width: width, height: 18)
+    caption.frame = NSRect(x: 13, y: 27, width: 208, height: 16)
     addSubview(caption)
-    slider.frame = NSRect(x: 15 + width, y: 4, width: 211 - width, height: 24)
     slider.setAccessibilityLabel(title)
   }
   @objc func move() {
@@ -154,12 +154,12 @@ final class FanIndicator {
     let count = Self.count(for: speed)
     guard count > 0 else { return nil }
     if count == cachedCount, fontSize == cachedSize, color == cachedColor { return cached }
-    let diameter = fontSize * (count == 3 ? 0.245 : 0.20)
+    let diameter = fontSize * 0.245
     let gap = fontSize * 0.09
     let size = NSSize(width: ceil(diameter + 2.5), height: fontSize)
     let image = NSImage(size: size, flipped: false) { rect in
       color.setFill()
-      let stack = CGFloat(count) * diameter + CGFloat(count - 1) * gap
+      let stack = 3 * diameter + 2 * gap
       for i in 0..<count {
         let dot = NSRect(
           x: (rect.width - diameter) / 2,
